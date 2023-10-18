@@ -494,7 +494,7 @@ void computeAccelerations() {
     int i, j;
     double f, rSqd;
     double rij[3]; // position of i relative to j
-    double varRSqd, rijf,a1,a2,a3;
+    double varRSqd, rijf,a1,a2,a3,l1,l2,l3;
     
     for (i = 0; i < N; i++) {  // set all accelerations to zero
         a[i][0] = 0;
@@ -523,14 +523,17 @@ void computeAccelerations() {
             f = (48-24*varRSqd)/(varRSqd*varRSqd*rSqd);
             //  from F = ma, where m = 1 in natural units!
 
-            a1 += rij[0] * f;
-            a[j][0] -= rij[0] * f;
+            l1 = rij[0]*f;
+            a1 += l1;
+            a[j][0] -= l1;
             
-            a2 += rij[1] * f;
-            a[j][1] -= rij[1] * f;
+            l2 = rij[1]*f;
+            a2 += l2;
+            a[j][1] -= l2;
 
-            a3 += rij[2] * f;
-            a[j][2] -= rij[2] * f;
+            l3 = rij[2]*f;
+            a3 += l3;
+            a[j][2] -= l3;
             
         }
         a[i][0]+=a1;
