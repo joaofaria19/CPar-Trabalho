@@ -41,6 +41,8 @@ double kB = 1.;
 double NA = 6.022140857e23;
 double kBSI = 1.38064852e-23;  // m^2*kg/(s^2*K)
 
+double Pot;
+
 //  Size of box, which will be specified in natural units
 double L;
 
@@ -69,7 +71,7 @@ void initialize();
 double VelocityVerlet(double dt, int iter, FILE *fp);  
 //  Compute Force using F = -dV/dr
 //  solve F = ma for use in Velocity Verlet
-void computeAccelerations();
+void computeAccelerationsOPT();
 //  Numerical Recipes function for generation gaussian distribution
 double gaussdist();
 //  Initialize velocities according to user-supplied initial Temperature (Tinit)
@@ -267,7 +269,7 @@ int main()
     //  Based on their positions, calculate the ininial intermolecular forces
     //  The accellerations of each particle will be defined from the forces and their
     //  mass, and this will allow us to update their positions via Newton's law
-    computeAccelerations();
+    computeAccelerationsOPT();
     
     
     // Print number of particles to the trajectory file
@@ -311,7 +313,7 @@ int main()
         //  We would also like to use the IGL to try to see if we can extract the gas constant
         mvs = MeanSquaredVelocity();
         KE = Kinetic();
-        PE = Potential();
+        PE = Pot;
         
         // Temperature from Kinetic Theory
         Temp = m*mvs/(3*kB) * TempFac;
@@ -455,91 +457,64 @@ double Kinetic() { //Write Function here!
     
 }
 
-
-// Function to calculate the potential energy of the system
-double Potential() {
-    double quot, r2, r2var, term1, term2, Pot;
-    double ri0, ri1, ri2;
-    int i, j;
-    double epsilon4 = 4*epsilon;
-    double sigma2 = (sigma*sigma);
-    Pot=0.;
-    for (i=0; i<N; i++) {
-        for (j=i+1; j<N; j++) {
-            
-            ri0 = r[i][0]-r[j][0];
-            ri1 = r[i][1]-r[j][1];
-            ri2 = r[i][2]-r[j][2];
-            
-            r2 = ri0*ri0 + ri1*ri1 + ri2*ri2;
-                            
-            r2var = sigma2/r2;
-            term2 = r2var*r2var*r2var;
-            term1 = term2*term2;    
-
-
-            Pot += (term1 - term2); 
-        }
-    }
-
-    return 2*epsilon4*Pot;
-}
-
-
-
-//   Uses the derivative of the Lennard-Jones potential to calculate
-//   the forces on each atom.  Then uses a = F/m to calculate the
-//   accelleration of each atom. 
-void computeAccelerations() {
+void computeAccelerationsOPT() {
+    Pot = 0;
     int i, j;
     double f, rSqd;
-    double rij[3]; // position of i relative to j
-    double varRSqd, rijf,a1,a2,a3,l1,l2,l3;
+    double rij[3];
     
-    for (i = 0; i < N; i++) {  // set all accelerations to zero
+    double varRSqd, rijf,a1,a2,a3,l1,l2,l3; // computeAccelerations variables
+
+    double quot, r2, r2var, term; // Potential variables
+    double sigma6 = sigma*sigma*sigma*sigma*sigma*sigma;
+    for (i = 0; i < N; i++) {
+        // loop unrolling
         a[i][0] = 0;
         a[i][1] = 0;
         a[i][2] = 0;
-        
     }
-    for (i = 0; i < N-1; i++) {   // loop over all distinct pairs i,j
-        a1=0;a2=0;a3=0;
+
+    for (i = 0; i < N-1; i++) {
+        a1=0;a2=0;a3=0; // Reduces the number of accesses to a[i][0], a[i][1] and a[i][2] by storing the sum's value and writing it into the matrix outside of the loop j.
         for (j = i+1; j < N; j++) {
-            // initialize r^2 to zero
-            rSqd = 0;
-            
-            //  component-by-componenent position of i relative to j
+            // loop unrolling
             rij[0] = r[i][0] - r[j][0];
             rij[1] = r[i][1] - r[j][1];
             rij[2] = r[i][2] - r[j][2];
-            
-            //  sum of squares of the components
-            rSqd += rij[0] * rij[0] + rij[1] * rij[1] + rij[2] * rij[2];
-            
-            
-            //  From derivative of Lennard-Jones with sigma and epsilon set equal to 1 in natural units!
-            // f = 24 * (2 * pow(rSqd, -7) - pow(rSqd, -4));
+            rSqd = r2 = rij[0] * rij[0] +
+                        rij[1] * rij[1] +
+                        rij[2] * rij[2];
+
+            //  mathematical simplification
             varRSqd = rSqd*rSqd*rSqd;
             f = (48-24*varRSqd)/(varRSqd*varRSqd*rSqd);
-            //  from F = ma, where m = 1 in natural units!
 
-            l1 = rij[0]*f;
+            // BEGIN OF POTENTIAL OPERATIONS
+            term = sigma6/(r2*r2*r2);
+            Pot += term * (term - 1);
+            // END OF POTENTIAL OPERATIONS
+
+            // loop unrolling using the vars ai0, ai1 and ai2 that reduce the number of accesses to the matrix a
+            l1= rij[0] * f;
             a1 += l1;
             a[j][0] -= l1;
             
-            l2 = rij[1]*f;
+            l2= rij[1] * f;
             a2 += l2;
             a[j][1] -= l2;
 
-            l3 = rij[2]*f;
+            l3= rij[2] * f;
             a3 += l3;
             a[j][2] -= l3;
-            
         }
+        // We only write the value into the matrix when we're outside of loop j in order to minimize the number of accesses to the matrix a.
         a[i][0]+=a1;
         a[i][1]+=a2;
         a[i][2]+=a3;
     }
+    // BEGIN OF POTENTIAL OPERATIONS
+    Pot *= epsilon*8;
+    // END OF POTENTIAL OPERATIONS
 }
 
 // returns sum of dv/dt*m/A (aka Pressure) from elastic collisions with walls
@@ -562,7 +537,7 @@ double VelocityVerlet(double dt, int iter, FILE *fp) {
         //printf("  %i  %6.4e   %6.4e   %6.4e\n",i,r[i][0],r[i][1],r[i][2]);
     }
     //  Update accellerations from updated positions
-    computeAccelerations();
+    computeAccelerationsOPT();
     //  Update velocity with updated acceleration
     for (i=0; i<N; i++) {
         for (j=0; j<3; j++) {
