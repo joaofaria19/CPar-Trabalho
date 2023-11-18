@@ -1,6 +1,6 @@
 CC = gcc
 SRC = src/
-CFLAGS = # select optimization flags (e.g., O2 or O3)
+CFLAGS = -O3 -ftree-vectorize -msse4 -g# select optimization flags (e.g., O2 or O3)
 
 .DEFAULT_GOAL = all
 

@@ -1,0 +1,33 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 154
+#
+# Samples: 1K of event 'cycles:ppp'
+# Event count (approx.): 28496709888
+#
+# Overhead       Samples  Command    Shared Object     Symbol                     
+# ........  ............  .........  ................  ...........................
+#
+    90.96%          1627  MDseq.exe  MDseq.exe         [.] computeAccelerationsOPT
+     9.01%           154  MDseq.exe  [unknown]         [k] 0xffffffffa158cbc0
+     0.01%             4  MDseq.exe  [unknown]         [k] 0xffffffffa0e6d5f8
+     0.01%             1  MDseq.exe  [unknown]         [k] 0xffffffffa0ee4b4f
+     0.00%             1  MDseq.exe  [unknown]         [k] 0xffffffffa1026a73
+     0.00%             1  MDseq.exe  libc-2.17.so      [.] __random
+     0.00%             1  MDseq.exe  [unknown]         [k] 0xffffffffa158c48a
+     0.00%             1  MDseq.exe  MDseq.exe         [.] initializeVelocities
+     0.00%             1  MDseq.exe  ld-2.17.so        [.] check_match.9525
+     0.00%             1  MDseq.exe  [unknown]         [k] 0xffffffffa0ffb653
+     0.00%             1  MDseq.exe  [unknown]         [k] 0xffffffffa159608e
+     0.00%             1  MDseq.exe  [unknown]         [k] 0xffffffffa0fa9edc
+     0.00%             1  MDseq.exe  ld-2.17.so        [.] __libc_memalign
+     0.00%             1  MDseq.exe  [unknown]         [k] 0xffffffffa1005afc
+     0.00%             1  MDseq.exe  [unknown]         [k] 0xffffffffa1213df1
+     0.00%             1  MDseq.exe  [unknown]         [k] 0xffffffffa0eea540
+     0.00%             3  perf       [unknown]         [k] 0xffffffffa0e6d5f8
+
+
+#
+# (Tip: Limit to show entries above 5% only: perf report --percent-limit 5)
+#
