@@ -463,65 +463,65 @@ void computeAccelerationsOPT() {
     int i, j;
     double f, rSqd;
     double rij[3];
+    double P = 0;
     
     double varRSqd, rijf,a1,a2,a3,l1,l2,l3; // computeAccelerations variables
 
     double quot, r2, r2var, term; // Potential variables
     double sigma6 = sigma*sigma*sigma*sigma*sigma*sigma;
+    
+    #pragma omp parallel for
     for (i = 0; i < N; i++) {
         // loop unrolling
         a[i][0] = 0;
         a[i][1] = 0;
         a[i][2] = 0;
     }
-    #pragma omp parallel num_threads(4)
-    {
 
-        for (i = 0; i < N-1; i++) {
-            a1=0;a2=0;a3=0; // Reduces the number of accesses to a[i][0], a[i][1] and a[i][2] by storing the sum's value and writing it into the matrix outside of the loop j.
+    //TODO verificar variavel a
+    #pragma omp parallel for reduction(+:P,a[:N][:3]) private(varRSqd,rij,rSqd,r2,f,term,l1,l2,l3,a1,a2,a3) 
+    for (i = 0; i < N-1; i++) {
+        a1=0;a2=0;a3=0; // Reduces the number of accesses to a[i][0], a[i][1] and a[i][2] by storing the sum's value and writing it into the matrix outside of the loop j.
+        for (j = i+1; j < N; j++) {
+            // loop unrolling
+            rij[0] = r[i][0] - r[j][0];
+            rij[1] = r[i][1] - r[j][1];
+            rij[2] = r[i][2] - r[j][2];
             
-            #pragma omp for schedule(dynamic)//reduction(+:Pot)
-            for (j = i+1; j < N; j++) {
-                // loop unrolling
-                rij[0] = r[i][0] - r[j][0];
-                rij[1] = r[i][1] - r[j][1];
-                rij[2] = r[i][2] - r[j][2];
-                
-                rSqd = r2 = rij[0] * rij[0] +
-                            rij[1] * rij[1] +
-                            rij[2] * rij[2];
+            rSqd = r2 = rij[0] * rij[0] +
+                        rij[1] * rij[1] +
+                        rij[2] * rij[2];
 
-                //  mathematical simplification
-                varRSqd = rSqd*rSqd*rSqd;
-                f = (48-24*varRSqd)/(varRSqd*varRSqd*rSqd);
+            //  mathematical simplification
+            varRSqd = rSqd*rSqd*rSqd;
+            f = (48-24*varRSqd)/(varRSqd*varRSqd*rSqd);
 
-                // BEGIN OF POTENTIAL OPERATIONS
-                term = sigma6/(r2*r2*r2);
-                Pot += term * (term - 1);
-                // END OF POTENTIAL OPERATIONS
+            // Potencial operations
+            term = sigma6/(r2*r2*r2);
+            P += term * (term - 1);
+            // end of potencial oprations
 
-                // loop unrolling using the vars ai0, ai1 and ai2 that reduce the number of accesses to the matrix a
-                l1= rij[0] * f;
-                l2= rij[1] * f;
-                l3= rij[2] * f;
-                
-                a1 += l1;
-                a2 += l2;
-                a3 += l3;
+            // loop unrolling using the vars a1, a2 and a3 that reduce the number of accesses to the matrix a
+            l1= rij[0] * f;
+            l2= rij[1] * f;
+            l3= rij[2] * f;
+            
+            a1 += l1;
+            a2 += l2;
+            a3 += l3;
 
-                a[j][0] -= l1;
-                a[j][1] -= l2;
-                a[j][2] -= l3;
-            }
-            // We only write the value into the matrix when we're outside of loop j in order to minimize the number of accesses to the matrix a.
-            a[i][0]+=a1;
-            a[i][1]+=a2;
-            a[i][2]+=a3;
+            a[j][0] -= l1;
+            a[j][1] -= l2;
+            a[j][2] -= l3;
         }
+        // We only write the value into the matrix when we're outside of loop j in order to minimize the number of accesses to the matrix a.
+        a[i][0]+=a1;
+        a[i][1]+=a2;
+        a[i][2]+=a3;
     }
-    // BEGIN OF POTENTIAL OPERATIONS
-    Pot *= epsilon*8;
-    // END OF POTENTIAL OPERATIONS
+    // Potencial operations
+    Pot = P*epsilon*8;
+    // end of potencial oprations
 }
 
 // returns sum of dv/dt*m/A (aka Pressure) from elastic collisions with walls
