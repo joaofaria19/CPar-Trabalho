@@ -461,16 +461,10 @@ double Kinetic() { //Write Function here!
 void computeAccelerationsOPT() {
     Pot = 0;
     int i, j;
-    double f, rSqd;
-    double rij[3];
     double P = 0;
-    
-    double varRSqd, rijf,a1,a2,a3,l1,l2,l3; // computeAccelerations variables
 
-    double quot, r2, r2var, term; // Potential variables
     double sigma6 = sigma*sigma*sigma*sigma*sigma*sigma;
     
-    #pragma omp parallel for
     for (i = 0; i < N; i++) {
         // loop unrolling
         a[i][0] = 0;
@@ -479,8 +473,12 @@ void computeAccelerationsOPT() {
     }
 
     //TODO verificar variavel a
-    #pragma omp parallel for reduction(+:P,a[:N][:3]) private(varRSqd,rij,rSqd,r2,f,term,l1,l2,l3,a1,a2,a3) 
+    #pragma omp parallel for reduction(+:P,a[:N][:3])
     for (i = 0; i < N-1; i++) {
+        double varRSqd, rijf,a1,a2,a3,l1,l2,l3; // computeAccelerations variables
+        double f, rSqd;
+        double term, r2;
+        double rij[3];
         a1=0;a2=0;a3=0; // Reduces the number of accesses to a[i][0], a[i][1] and a[i][2] by storing the sum's value and writing it into the matrix outside of the loop j.
         for (j = i+1; j < N; j++) {
             // loop unrolling
