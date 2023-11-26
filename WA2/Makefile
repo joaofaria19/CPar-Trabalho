@@ -4,7 +4,7 @@ CFLAGS = -O3 -pg -ftree-vectorize -msse4 -g -fno-omit-frame-pointer -funroll-loo
 
 .DEFAULT_GOAL = all
 
-all: MDseq.exe MDpar.exe
+all: MDseq.exe MDpar.exe MDparN.exe
 
 MDseq.exe: $(SRC)/MDseq.cpp
 	module load gcc/11.2.0; \
@@ -13,6 +13,10 @@ MDseq.exe: $(SRC)/MDseq.cpp
 MDpar.exe: $(SRC)/MDpar.cpp
 	module load gcc/11.2.0; \
 	$(CC) $(CFLAGS) $(SRC)MDpar.cpp -lm -fopenmp -o MDpar.exe
+
+MDparN.exe: $(SRC)/MDparN.cpp
+	module load gcc/11.2.0; \
+	$(CC) $(CFLAGS) $(SRC)MDparNew.cpp -lm -fopenmp -o MDparN.exe
 
 clean:
 	rm ./MD*.exe
@@ -25,9 +29,13 @@ runpar:
 	./MDpar.exe < inputdata.txt
 
 runS:
-	./MDseq.exe < inputdata.txt
+	sbatch --partition=cpar --cpus-per-task=40 time2.sh
 
 runP:
-	export OMP_NUM_THREADS=25; \
+	export OMP_NUM_THREADS=40; \
 	sbatch --partition=cpar --cpus-per-task=40 time.sh
+
+runPN:
+	export OMP_NUM_THREADS=40; \
+	sbatch --partition=cpar --cpus-per-task=40 timeN.sh
 
