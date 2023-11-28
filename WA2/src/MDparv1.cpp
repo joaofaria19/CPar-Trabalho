@@ -72,13 +72,13 @@ void initialize();
 double VelocityVerlet(double dt, int iter, FILE *fp);  
 //  Compute Force using F = -dV/dr
 //  solve F = ma for use in Velocity Verlet
-void computeAccelerations();
+void computeAccelerationsOPT();
 //  Numerical Recipes function for generation gaussian distribution
 double gaussdist();
 //  Initialize velocities according to user-supplied initial Temperature (Tinit)
 void initializeVelocities();
 //  Compute total potential energy from particle coordinates
-void computeAccelerationsOPT();
+double Potential();
 //  Compute mean squared velocity from particle velocities
 double MeanSquaredVelocity();
 //  Compute total kinetic energy from particle mass and velocities
@@ -270,7 +270,7 @@ int main()
     //  Based on their positions, calculate the ininial intermolecular forces
     //  The accellerations of each particle will be defined from the forces and their
     //  mass, and this will allow us to update their positions via Newton's law
-    computeAccelerations();
+    computeAccelerationsOPT();
     
     
     // Print number of particles to the trajectory file
@@ -457,56 +457,6 @@ double Kinetic() { //Write Function here!
     return kin;
     
 }
-void computeAccelerations() {
-    int i, j;
-    
-    for (i = 0; i < N; i++) {
-        // loop unrolling
-        a[i][0] = 0;
-        a[i][1] = 0;
-        a[i][2] = 0;
-    }
-
-    //TODO verificar variavel a
-    #pragma omp parallel for reduction(+:a[:N][:3]) schedule(dynamic,40)
-    for (i = 0; i < N-1; i++) {
-        double varRSqd,a1,a2,a3,l1,l2,l3; // computeAccelerations variables
-        double f, rSqd;
-        double rij[3];
-        a1=0;a2=0;a3=0; // Reduces the number of accesses to a[i][0], a[i][1] and a[i][2] by storing the sum's value and writing it into the matrix outside of the loop j.
-        for (j = i+1; j < N; j++) {
-            // loop unrolling
-            rij[0] = r[i][0] - r[j][0];
-            rij[1] = r[i][1] - r[j][1];
-            rij[2] = r[i][2] - r[j][2];
-            
-            rSqd  = rij[0] * rij[0] +
-                    rij[1] * rij[1] +
-                    rij[2] * rij[2];
-
-            //  mathematical simplification
-            varRSqd = rSqd*rSqd*rSqd;
-            f = (48-24*varRSqd)/(varRSqd*varRSqd*rSqd);
-
-            // loop unrolling using the vars a1, a2 and a3 that reduce the number of accesses to the matrix a
-            l1= rij[0] * f;
-            l2= rij[1] * f;
-            l3= rij[2] * f;
-            
-            a1 += l1;
-            a2 += l2;
-            a3 += l3;
-
-            a[j][0] -= l1;
-            a[j][1] -= l2;
-            a[j][2] -= l3;
-        }
-        // We only write the value into the matrix when we're outside of loop j in order to minimize the number of accesses to the matrix a.
-        a[i][0]+=a1;
-        a[i][1]+=a2;
-        a[i][2]+=a3;
-    }
-}
 
 void computeAccelerationsOPT() {
     Pot = 0;
@@ -523,9 +473,9 @@ void computeAccelerationsOPT() {
     }
 
     //TODO verificar variavel a
-    #pragma omp parallel for reduction(+:P,a[:N][:3]) schedule(dynamic,40)
+    #pragma omp parallel for reduction(+:P,a[:N][:3])
     for (i = 0; i < N-1; i++) {
-        double varRSqd,a1,a2,a3,l1,l2,l3; // computeAccelerations variables
+        double varRSqd, rijf,a1,a2,a3,l1,l2,l3; // computeAccelerations variables
         double f, rSqd;
         double term, r2;
         double rij[3];
