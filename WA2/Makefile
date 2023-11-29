@@ -22,7 +22,7 @@ runseq:
 
 runpar:
 	export OMP_NUM_THREADS=40; \
-	./MDparN.exe < inputdata.txt
+	./MDpar.exe < inputdata.txt
 
 runS:
 	sbatch --partition=cpar --cpus-per-task=40 time2.sh
