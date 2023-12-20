@@ -98,6 +98,26 @@ double Kinetic();
 void initializeKernel();
 void newacelarationKernel();
 
+#if __CUDA_ARCH__ < 600
+__device__ double myatomicAdd(double* address, double val)
+{
+    unsigned long long int* address_as_ull =
+                              (unsigned long long int*)address;
+    unsigned long long int old = *address_as_ull, assumed;
+
+    do {
+        assumed = old;
+        old = atomicCAS(address_as_ull, assumed,
+                        __double_as_longlong(val +
+                               __longlong_as_double(assumed)));
+
+    // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
+    } while (assumed != old);
+
+    return __longlong_as_double(old);
+}
+#endif
+
 void initialize() {
     int n, p, i, j, k;
     double pos;
@@ -271,9 +291,9 @@ void newacelarationKernel (int dN,double *da,double *dr) {
         a2 += l2;
         a3 += l3;
 
-        atomicAdd(&da[j * 3], -l1);
-        atomicAdd(&da[j * 3 + 1], -l2);
-        atomicAdd(&da[j * 3 + 2], -l3);
+        myatomicAdd(&da[j * 3], -l1);
+        myatomicAdd(&da[j * 3 + 1], -l2);
+        myatomicAdd(&da[j * 3 + 2], -l3);
     }
         da[id * 3]+=a1;
         da[id * 3 + 1]+=a2;
@@ -290,7 +310,6 @@ void computeAccelerations() {
         a[i][2] = 0;
     }
 
-    //TODO verificar variavel a
     #pragma omp parallel for reduction(+:a[:N][:3]) schedule(dynamic,40)
     for (int i = 0; i < N-1; i++) {
         double varRSqd,a1,a2,a3,l1,l2,l3; // computeAccelerations variables
@@ -373,7 +392,7 @@ void newpotacelarationKernel (int dN,double sigma6,double *da,double *dr,double 
 
         // Potencial operations
         term = sigma6/(r2*r2*r2);
-        atomicAdd(&dP[0],term * (term - 1));
+        myatomicAdd(dP,term * (term - 1));
 
         // loop unrolling using the vars a1, a2 and a3 that reduce the number of accesses to the matrix a
         l1= rij[0] * f;
@@ -384,9 +403,9 @@ void newpotacelarationKernel (int dN,double sigma6,double *da,double *dr,double 
         a2 += l2;
         a3 += l3;
 
-        atomicAdd(&da[j * 3], -l1);
-        atomicAdd(&da[j * 3 + 1], -l2);
-        atomicAdd(&da[j * 3 + 2], -l3);
+        myatomicAdd(&da[j * 3], -l1);
+        myatomicAdd(&da[j * 3 + 1], -l2);
+        myatomicAdd(&da[j * 3 + 2], -l3);
     }
         da[id * 3]+=a1;
         da[id * 3 + 1]+=a2;
@@ -407,7 +426,6 @@ void computeAccelerationsOPT() {
         a[i][2] = 0;
     }
 
-    //TODO verificar variavel a
     #pragma omp parallel for reduction(+:P,a[:N][:3]) schedule(dynamic,40)
     for (int i = 0; i < N-1; i++) {
         double varRSqd,a1,a2,a3,l1,l2,l3; // computeAccelerations variables
@@ -480,13 +498,17 @@ double VelocityVerlet(double dt, int iter, FILE *fp) {
     //computeAccelerationsOPT();
     double sigma6 = sigma*sigma*sigma*sigma*sigma*sigma;
     
+    cudaMemcpy(dr, r, MAXPART * 3 * sizeof(double), cudaMemcpyHostToDevice);
+    checkCUDAError("memcpy h->d,VelocityVerlet");
+
+
     initializeacelarationKernel <<< NUM_THREADS_PER_BLOCK, NUM_BLOCKS >>> (N, da);
     newpotacelarationKernel <<< NUM_THREADS_PER_BLOCK, NUM_BLOCKS >>> (N,sigma6,da,dr,dP);
-    checkCUDAError("kernel invocation");
+    checkCUDAError("kernel invocation,VelocityVerlet");
 
     cudaMemcpy(&P, dP, sizeof(double), cudaMemcpyDeviceToHost);
-    cudaMemcpy(&a, da, MAXPART * 3 * sizeof(double), cudaMemcpyDeviceToHost);
-    checkCUDAError("memcpy d->h");
+    cudaMemcpy(a, da, MAXPART * 3 * sizeof(double), cudaMemcpyDeviceToHost);
+    checkCUDAError("memcpy d->h,VelocityVerlet");
 
     Pot = P*epsilon*8;
     
@@ -808,7 +830,9 @@ int main()
     newacelarationKernel <<< NUM_THREADS_PER_BLOCK, NUM_BLOCKS >>> (N, da,dr);
     checkCUDAError("kernel invocation");
 
-    cudaMemcpy(&a, da, MAXPART * 3 * sizeof(double), cudaMemcpyDeviceToHost);
+    cudaDeviceSynchronize();
+    checkCUDAError("cudaDeviceSynchronize");
+    cudaMemcpy(a, da, MAXPART * 3 * sizeof(double), cudaMemcpyDeviceToHost);
     checkCUDAError("memcpy d->h");
 
     // Print number of particles to the trajectory file
