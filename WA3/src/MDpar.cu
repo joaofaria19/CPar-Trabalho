@@ -69,7 +69,7 @@ double *da;
 double F[MAXPART][3];
 
 #define NUM_BLOCKS 512
-#define NUM_THREADS_PER_BLOCK 256
+#define NUM_THREADS_PER_BLOCK 1024
 #define SIZE NUM_BLOCKS*NUM_THREADS_PER_BLOCK
 
 // atom type
@@ -168,11 +168,11 @@ void initialize() {
 //Function to initialize the kernel
 void initializeKernel(){
     // declare variable with size of the array in bytes
-	int bytes = MAXPART * 3 * sizeof(double);
+	int bytes = N * 3 * sizeof(double);
 
     cudaMalloc ((void**) &da, bytes);
     cudaMalloc ((void**) &dr, bytes);
-    cudaMalloc((void**) &dP, sizeof(double));
+    cudaMalloc((void**) &dP, N*sizeof(double));
     checkCUDAError("mem allocation");
 
     // copy inputs to the device
@@ -248,7 +248,7 @@ __global__
 void newacelarationKernel (int dN,double *da,double *dr) {
     int id = blockIdx.x * blockDim.x + threadIdx.x;
     int lid = threadIdx.x;
-    
+/*    
     __shared__ double shared_dr[NUM_THREADS_PER_BLOCK * 3];
 
     if(lid == 0){
@@ -260,8 +260,8 @@ void newacelarationKernel (int dN,double *da,double *dr) {
         }
     }
     __syncthreads();
-
-    if (id >= dN) return;
+*/
+    if (id >= dN-1) return;
 
     double varRSqd,a1,a2,a3,l1,l2,l3; // computeAccelerations variables
     double f, rSqd;
@@ -269,11 +269,16 @@ void newacelarationKernel (int dN,double *da,double *dr) {
     a1=0;a2=0;a3=0;
 
     for (int j = id+1; j < dN; j++) {
+/*
         // loop unrolling
         rij[0] = shared_dr[id * 3] - shared_dr[j * 3];
         rij[1] = shared_dr[id * 3 + 1] - shared_dr[j * 3 + 1];
         rij[2] = shared_dr[id * 3 + 2] - shared_dr[j * 3 + 2];
-        
+*/      
+        rij[0] = dr[id * 3] - dr[j * 3];
+        rij[1] = dr[id * 3 + 1] - dr[j * 3 + 1];
+        rij[2] = dr[id * 3 + 2] - dr[j * 3 + 2];
+
         rSqd  = rij[0] * rij[0] +
                 rij[1] * rij[1] +
                 rij[2] * rij[2];
@@ -295,9 +300,11 @@ void newacelarationKernel (int dN,double *da,double *dr) {
         myatomicAdd(&da[j * 3 + 1], -l2);
         myatomicAdd(&da[j * 3 + 2], -l3);
     }
-        da[id * 3]+=a1;
-        da[id * 3 + 1]+=a2;
-        da[id * 3 + 2]+=a3;
+
+    myatomicAdd(&da[id * 3], a1);
+    myatomicAdd(&da[id * 3 + 1], a2);
+    myatomicAdd(&da[id * 3 + 2], a3);
+
 }
 
 void computeAccelerations() {
@@ -354,7 +361,7 @@ __global__
 void newpotacelarationKernel (int dN,double sigma6,double *da,double *dr,double *dP) {
     int id = blockIdx.x * blockDim.x + threadIdx.x;
     int lid = threadIdx.x;
-    
+/*   
     __shared__ double shared_dr[NUM_THREADS_PER_BLOCK * 3];
 
     if(lid == 0){
@@ -365,23 +372,30 @@ void newpotacelarationKernel (int dN,double sigma6,double *da,double *dr,double 
         }
     }
 
-    dP = 0;
+    //dP = 0;
     __syncthreads();
-
-    if (id >= dN) return;
+*/
+    if (id >= dN-1) return;
 
     double varRSqd,a1,a2,a3,l1,l2,l3; // computeAccelerations variables
     double f, rSqd;
-    double term, r2;
+    double term, r2;// Potential variables
     double rij[3];
     a1=0;a2=0;a3=0;
 
+    dP[id]=0;
+
     for (int j = id+1; j < dN; j++) {
+/*
         // loop unrolling
         rij[0] = shared_dr[id * 3] - shared_dr[j * 3];
         rij[1] = shared_dr[id * 3 + 1] - shared_dr[j * 3 + 1];
         rij[2] = shared_dr[id * 3 + 2] - shared_dr[j * 3 + 2];
-        
+*/        
+        rij[0] = dr[id * 3] - dr[j * 3];
+        rij[1] = dr[id * 3 + 1] - dr[j * 3 + 1];
+        rij[2] = dr[id * 3 + 2] - dr[j * 3 + 2];
+
         rSqd = r2 = rij[0] * rij[0] +
                     rij[1] * rij[1] +
                     rij[2] * rij[2];
@@ -392,8 +406,8 @@ void newpotacelarationKernel (int dN,double sigma6,double *da,double *dr,double 
 
         // Potencial operations
         term = sigma6/(r2*r2*r2);
-        myatomicAdd(dP,term * (term - 1));
-
+        //myatomicAdd(dP,term * (term - 1));
+        dP[id]+=term * (term - 1);
         // loop unrolling using the vars a1, a2 and a3 that reduce the number of accesses to the matrix a
         l1= rij[0] * f;
         l2= rij[1] * f;
@@ -407,9 +421,11 @@ void newpotacelarationKernel (int dN,double sigma6,double *da,double *dr,double 
         myatomicAdd(&da[j * 3 + 1], -l2);
         myatomicAdd(&da[j * 3 + 2], -l3);
     }
-        da[id * 3]+=a1;
-        da[id * 3 + 1]+=a2;
-        da[id * 3 + 2]+=a3;
+
+    myatomicAdd(&da[id * 3], a1);
+    myatomicAdd(&da[id * 3 + 1], a2);
+    myatomicAdd(&da[id * 3 + 2], a3);
+
 }
 
 void computeAccelerationsOPT() {
@@ -498,17 +514,23 @@ double VelocityVerlet(double dt, int iter, FILE *fp) {
     //computeAccelerationsOPT();
     double sigma6 = sigma*sigma*sigma*sigma*sigma*sigma;
     
-    cudaMemcpy(dr, r, MAXPART * 3 * sizeof(double), cudaMemcpyHostToDevice);
+    cudaMemcpy(dr, r, N * 3 * sizeof(double), cudaMemcpyHostToDevice);
     checkCUDAError("memcpy h->d,VelocityVerlet");
 
 
     initializeacelarationKernel <<< NUM_THREADS_PER_BLOCK, NUM_BLOCKS >>> (N, da);
     newpotacelarationKernel <<< NUM_THREADS_PER_BLOCK, NUM_BLOCKS >>> (N,sigma6,da,dr,dP);
     checkCUDAError("kernel invocation,VelocityVerlet");
+    double Pa[N];
+    cudaMemcpy(Pa, dP, N * sizeof(double), cudaMemcpyDeviceToHost);
+    checkCUDAError("memcpy d->h,VelocityVerlet P");
+    cudaMemcpy(a, da, N * 3 * sizeof(double), cudaMemcpyDeviceToHost);
+    checkCUDAError("memcpy d->h,VelocityVerlet a");
 
-    cudaMemcpy(&P, dP, sizeof(double), cudaMemcpyDeviceToHost);
-    cudaMemcpy(a, da, MAXPART * 3 * sizeof(double), cudaMemcpyDeviceToHost);
-    checkCUDAError("memcpy d->h,VelocityVerlet");
+    P = 0.0;
+    for (int i = 0; i < N - 1; i++){
+        P += Pa[i];
+    }
 
     Pot = P*epsilon*8;
     
@@ -828,11 +850,10 @@ int main()
     //computeAccelerations();
     initializeacelarationKernel <<< NUM_THREADS_PER_BLOCK, NUM_BLOCKS >>> (N, da);
     newacelarationKernel <<< NUM_THREADS_PER_BLOCK, NUM_BLOCKS >>> (N, da,dr);
+
     checkCUDAError("kernel invocation");
 
-    cudaDeviceSynchronize();
-    checkCUDAError("cudaDeviceSynchronize");
-    cudaMemcpy(a, da, MAXPART * 3 * sizeof(double), cudaMemcpyDeviceToHost);
+    cudaMemcpy(a, da, N * 3 * sizeof(double), cudaMemcpyDeviceToHost);
     checkCUDAError("memcpy d->h");
 
     // Print number of particles to the trajectory file
