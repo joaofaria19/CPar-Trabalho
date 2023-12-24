@@ -68,6 +68,7 @@ double *da;
 //  Force
 double F[MAXPART][3];
 
+#define NUM_BLOCKS 15
 #define NUM_THREADS_PER_BLOCK 1024
 #define SIZE NUM_BLOCKS*NUM_THREADS_PER_BLOCK
 
@@ -166,7 +167,6 @@ void initialize() {
 
 //Function to initialize the kernel
 void initializeKernel(){
-    #define NUM_BLOCKS 15
     // declare variable with size of the array in bytes
 	int bytes = N * 3 * sizeof(double);
 
@@ -378,51 +378,51 @@ void newpotacelarationKernel (int dN,double sigma6,double *da,double *dr,double 
     myatomicAdd(&da[id * 3 + 2], a3);
 }
 
-__device__ int determinarBlocoParticula(int bid, int dBlocos, const int* limites) {
-    for (int k = 0; k < dBlocos; ++k) {
-        if (bid < limites[k]) {
-            return k;
-        }
-    }
-}
-
 __global__ 
 void newpotacelarationKernelOPT (int dN,double sigma6,double *da,double *dr,double *dP,int dBlocos) {
     int id = blockIdx.x * blockDim.x + threadIdx.x;
     int lid = threadIdx.x;
     int bid = blockIdx.x;
     int particulas= blockDim.x;
-
-    __shared__ double shared_dr[1024*3];
-    __shared__ int blocoparticula;
-    __shared__ int blocoacomparar;
+    
+    __shared__ double shared_dr[NUM_THREADS_PER_BLOCK*3];
+    __shared__ double shared_da[NUM_THREADS_PER_BLOCK*3];
+    int blocoparticula;
+    int blocoacomparar;
     int limites[5];
 
-    int ultimathread = 1024 - (dBlocos*1024-dN)-1;
-
+    int ultimathread = NUM_THREADS_PER_BLOCK - (dBlocos*NUM_THREADS_PER_BLOCK-dN)-1;
+                    
     //int blocostotais = (dBlocos*(dBlocos+1))/2;
-    if(lid == 0){
-        int dBlocosaux=dBlocos;
-        for(int l=0;l<dBlocos;l++){
-            limites[l]=dBlocosaux;
-            dBlocosaux+=(dBlocos-l-1);
-        }
+    // indice da particula no array global
+    int newID = (lid + blocoparticula * NUM_THREADS_PER_BLOCK);
 
-        blocoparticula=determinarBlocoParticula(bid,dBlocos,limites);
-        if (blocoparticula==0){blocoacomparar= blockIdx.x;}
-        else{
-            blocoacomparar = blockIdx.x - limites[blocoparticula-1]+blocoparticula;
-        }
-        
-        for(int j = 0; j < 1024 ||(blocoacomparar == dBlocos-1 && j < ultimathread); j++) {
-            shared_dr[j * 3] = dr[(j + blocoacomparar*1024) * 3] ;
-            shared_dr[j * 3 + 1] = dr[(j + blocoacomparar*1024) * 3 + 1];
-            shared_dr[j * 3 + 2] = dr[(j + blocoacomparar*1024) * 3 + 2];         
+    int dBlocosaux=dBlocos;
+    for(int l=0;l<dBlocos;l++){
+        limites[l]=dBlocosaux;
+        dBlocosaux+=(dBlocos-l-1);
+    }
+
+    for (int k = 0; k < dBlocos; k++) {
+        if (bid < limites[k]) {
+            blocoparticula = k;
+            break;
         }
     }
-    __syncthreads();
 
-    int newID = (lid + blocoparticula * 1024);
+    if (blocoparticula==0){blocoacomparar= blockIdx.x;}
+    else{
+        blocoacomparar = blockIdx.x - limites[blocoparticula-1]+blocoparticula;
+    }
+     
+    if (blocoparticula == dBlocos-1 && newID >= ultimathread) return;
+
+    shared_dr[lid * 3] = dr[(lid + blocoacomparar*1024) * 3] ;
+    shared_dr[lid * 3 + 1] = dr[(lid + blocoacomparar*1024) * 3 + 1];
+    shared_dr[lid * 3 + 2] = dr[(lid + blocoacomparar*1024) * 3 + 2];
+
+
+    __syncthreads();
 
     double varRSqd,a1,a2,a3,l1,l2,l3; // computeAccelerations variables
     double f, rSqd;
@@ -434,50 +434,18 @@ void newpotacelarationKernelOPT (int dN,double sigma6,double *da,double *dr,doub
     aux[1]=dr[newID * 3 + 1];
     aux[2]=dr[newID * 3 + 2];
     double dPaux=0.0;
-    if (blocoparticula == dBlocos-1 && newID >= ultimathread) return;
-    /*
-    for (int j = lid+1;  j<ultimathread; j++) {
+    
+    //TODO retificarid
+    for (int j = lid+1; j < NUM_THREADS_PER_BLOCK || (blocoacomparar==dBlocos-1 && j < ultimathread); j++) {
+        //TODDO retificar acesso ao shared
+        rij[0] = aux[0] - shared_dr[j*3];
+        rij[1] = aux[1] - shared_dr[j*3+1];
+        rij[2] = aux[2] - shared_dr[j*3+2];
         
-        rij[0] = aux[0] - shared_dr[j * 3];
-        rij[1] = aux[1] - shared_dr[j * 3 + 1];
-        rij[2] = aux[2] - shared_dr[j * 3 + 2];
-
         rSqd = r2 = rij[0] * rij[0] +
                     rij[1] * rij[1] +
                     rij[2] * rij[2];
-
-        //  mathematical simplification
-        varRSqd = rSqd*rSqd*rSqd;
-        f = (48-24*varRSqd)/(varRSqd*varRSqd*rSqd);
-
-        // Potencial operations
-        term = sigma6/(r2*r2*r2);
-        //myatomicAdd(dP,term * (term - 1));
-        dPaux+=term * (term - 1);
-        // loop unrolling using the vars a1, a2 and a3 that reduce the number of accesses to the matrix a
-        l1= rij[0] * f;
-        l2= rij[1] * f;
-        l3= rij[2] * f;
-        
-        a1 += l1;
-        a2 += l2;
-        a3 += l3;
-        
-        myatomicAdd(&da[(j + blocoacomparar * 1024) * 3], -l1);
-        myatomicAdd(&da[(j + blocoacomparar * 1024) * 3 + 1], -l2);
-        myatomicAdd(&da[(j + blocoacomparar * 1024) * 3 + 2], -l3);
-        
-    }
-    *///TODO retificarid
-    for (int j = lid+1; j < 1024 ||(blocoacomparar == dBlocos-1 && j < ultimathread); j++) {
-        rij[0] = aux[0] - dr[(j + blocoacomparar*1024) * 3];
-        rij[1] = aux[1] - dr[(j + blocoacomparar*1024) * 3 + 1];
-        rij[2] = aux[2] - dr[(j + blocoacomparar*1024) * 3 + 2];
-    /*
-        rSqd = r2 = rij[0] * rij[0] +
-                    rij[1] * rij[1] +
-                    rij[2] * rij[2];
-    */
+    
         //  mathematical simplification
         varRSqd = rSqd*rSqd*rSqd;
         f = (48-24*varRSqd)/(varRSqd*varRSqd*rSqd);
@@ -493,11 +461,12 @@ void newpotacelarationKernelOPT (int dN,double sigma6,double *da,double *dr,doub
         a1 += l1;
         a2 += l2;
         a3 += l3;
-        //ToDO retificar id
-        myatomicAdd(&da[newID * 3], -l1);
-        myatomicAdd(&da[newID * 3 + 1], -l2);
-        myatomicAdd(&da[newID * 3 + 2], -l3);
-
+        //ToDO retificar id acesso
+    /*    
+        myatomicAdd(&da[(j + blocoacomparar * NUM_THREADS_PER_BLOCK) * 3], -l1);
+        myatomicAdd(&da[(j + blocoacomparar * NUM_THREADS_PER_BLOCK) * 3 + 1], -l2);
+        myatomicAdd(&da[(j + blocoacomparar * NUM_THREADS_PER_BLOCK) * 3 + 2], -l3);
+    */
     }
     myatomicAdd(&dP[newID], dPaux);
     myatomicAdd(&da[newID * 3], a1);
@@ -533,8 +502,8 @@ double VelocityVerlet(double dt, int iter, FILE *fp) {
     checkCUDAError("memcpy h->d,VelocityVerlet");
 
 
-    initializeacelarationKernel <<< NUM_THREADS_PER_BLOCK, NUM_BLOCKS >>> (N, da);
-    newpotacelarationKernelOPT <<< NUM_THREADS_PER_BLOCK, NUM_BLOCKS >>> (N,sigma6,da,dr,dP,5);
+    initializeacelarationKernel <<< NUM_BLOCKS,NUM_THREADS_PER_BLOCK >>> (N, da);
+    newpotacelarationKernelOPT <<<NUM_BLOCKS,NUM_THREADS_PER_BLOCK>>> (N,sigma6,da,dr,dP,5);
     checkCUDAError("kernel invocation,VelocityVerlet");
     double Pa[N];
     cudaMemcpy(Pa, dP, N * sizeof(double), cudaMemcpyDeviceToHost);
@@ -863,8 +832,8 @@ int main()
     //  The accellerations of each particle will be defined from the forces and their
     //  mass, and this will allow us to update their positions via Newton's law
     //computeAccelerations();
-    initializeacelarationKernel <<< NUM_THREADS_PER_BLOCK, NUM_BLOCKS >>> (N, da);
-    newacelarationKernel <<< NUM_THREADS_PER_BLOCK, NUM_BLOCKS >>> (N, da,dr);
+    initializeacelarationKernel <<<NUM_BLOCKS,NUM_THREADS_PER_BLOCK >>> (N, da);
+    newacelarationKernel <<< NUM_BLOCKS,NUM_THREADS_PER_BLOCK>>> (N, da,dr);
 
     checkCUDAError("kernel invocation");
 
