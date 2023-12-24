@@ -68,7 +68,6 @@ double *da;
 //  Force
 double F[MAXPART][3];
 
-#define NUM_BLOCKS 512
 #define NUM_THREADS_PER_BLOCK 1024
 #define SIZE NUM_BLOCKS*NUM_THREADS_PER_BLOCK
 
@@ -167,6 +166,7 @@ void initialize() {
 
 //Function to initialize the kernel
 void initializeKernel(){
+    #define NUM_BLOCKS 15
     // declare variable with size of the array in bytes
 	int bytes = N * 3 * sizeof(double);
 
@@ -248,7 +248,7 @@ __global__
 void newacelarationKernel (int dN,double *da,double *dr) {
     int id = blockIdx.x * blockDim.x + threadIdx.x;
     int lid = threadIdx.x;
-/*    
+ /*    
     __shared__ double shared_dr[NUM_THREADS_PER_BLOCK * 3];
 
     if(lid == 0){
@@ -260,7 +260,7 @@ void newacelarationKernel (int dN,double *da,double *dr) {
         }
     }
     __syncthreads();
-*/
+ */
     if (id >= dN-1) return;
 
     double varRSqd,a1,a2,a3,l1,l2,l3; // computeAccelerations variables
@@ -269,12 +269,12 @@ void newacelarationKernel (int dN,double *da,double *dr) {
     a1=0;a2=0;a3=0;
 
     for (int j = id+1; j < dN; j++) {
-/*
+ /*
         // loop unrolling
         rij[0] = shared_dr[id * 3] - shared_dr[j * 3];
         rij[1] = shared_dr[id * 3 + 1] - shared_dr[j * 3 + 1];
         rij[2] = shared_dr[id * 3 + 2] - shared_dr[j * 3 + 2];
-*/      
+ */      
         rij[0] = dr[id * 3] - dr[j * 3];
         rij[1] = dr[id * 3 + 1] - dr[j * 3 + 1];
         rij[2] = dr[id * 3 + 2] - dr[j * 3 + 2];
@@ -307,74 +307,24 @@ void newacelarationKernel (int dN,double *da,double *dr) {
 
 }
 
-void computeAccelerations() {
-    int i;
-    
-    for (i = 0; i < N; i++) {
-        // loop unrolling
-        a[i][0] = 0;
-        a[i][1] = 0;
-        a[i][2] = 0;
-    }
-
-    #pragma omp parallel for reduction(+:a[:N][:3]) schedule(dynamic,40)
-    for (int i = 0; i < N-1; i++) {
-        double varRSqd,a1,a2,a3,l1,l2,l3; // computeAccelerations variables
-        double f, rSqd;
-        double rij[3];
-        a1=0;a2=0;a3=0; // Reduces the number of accesses to a[i][0], a[i][1] and a[i][2] by storing the sum's value and writing it into the matrix outside of the loop j.
-        for (int j = i+1; j < N; j++) {
-            // loop unrolling
-            rij[0] = r[i][0] - r[j][0];
-            rij[1] = r[i][1] - r[j][1];
-            rij[2] = r[i][2] - r[j][2];
-            
-            rSqd  = rij[0] * rij[0] +
-                    rij[1] * rij[1] +
-                    rij[2] * rij[2];
-
-            //  mathematical simplification
-            varRSqd = rSqd*rSqd*rSqd;
-            f = (48-24*varRSqd)/(varRSqd*varRSqd*rSqd);
-
-            // loop unrolling using the vars a1, a2 and a3 that reduce the number of accesses to the matrix a
-            l1= rij[0] * f;
-            l2= rij[1] * f;
-            l3= rij[2] * f;
-            
-            a1 += l1;
-            a2 += l2;
-            a3 += l3;
-
-            a[j][0] -= l1;
-            a[j][1] -= l2;
-            a[j][2] -= l3;
-        }
-        // We only write the value into the matrix when we're outside of loop j in order to minimize the number of accesses to the matrix a.
-        a[i][0]+=a1;
-        a[i][1]+=a2;
-        a[i][2]+=a3;
-    }
-}
-
 __global__ 
 void newpotacelarationKernel (int dN,double sigma6,double *da,double *dr,double *dP) {
     int id = blockIdx.x * blockDim.x + threadIdx.x;
     int lid = threadIdx.x;
-/*   
+    /*
     __shared__ double shared_dr[NUM_THREADS_PER_BLOCK * 3];
-
+    
     if(lid == 0){
         for(int j = 0; j < dN; j++) {
             shared_dr[j * 3] = dr[j * 3] ;
             shared_dr[j * 3 + 1] = dr[j * 3 + 1];
-            shared_dr[j * 3 + 2] = dr[j * 3 + 2]; 
+            shared_dr[j * 3 + 2] = dr[j * 3 + 2];            
         }
     }
 
     //dP = 0;
     __syncthreads();
-*/
+ */
     if (id >= dN-1) return;
 
     double varRSqd,a1,a2,a3,l1,l2,l3; // computeAccelerations variables
@@ -383,18 +333,17 @@ void newpotacelarationKernel (int dN,double sigma6,double *da,double *dr,double 
     double rij[3];
     a1=0;a2=0;a3=0;
 
-    dP[id]=0;
+    double dPaux=0.0;
+    double aux[3];
+    aux[0]=dr[id * 3];
+    aux[1]=dr[id * 3 + 1];
+    aux[2]=dr[id * 3 + 2];
 
     for (int j = id+1; j < dN; j++) {
-/*
-        // loop unrolling
-        rij[0] = shared_dr[id * 3] - shared_dr[j * 3];
-        rij[1] = shared_dr[id * 3 + 1] - shared_dr[j * 3 + 1];
-        rij[2] = shared_dr[id * 3 + 2] - shared_dr[j * 3 + 2];
-*/        
-        rij[0] = dr[id * 3] - dr[j * 3];
-        rij[1] = dr[id * 3 + 1] - dr[j * 3 + 1];
-        rij[2] = dr[id * 3 + 2] - dr[j * 3 + 2];
+
+        rij[0] = aux[0] - dr[j * 3];
+        rij[1] = aux[1] - dr[j * 3 + 1];
+        rij[2] = aux[2] - dr[j * 3 + 2];
 
         rSqd = r2 = rij[0] * rij[0] +
                     rij[1] * rij[1] +
@@ -407,7 +356,7 @@ void newpotacelarationKernel (int dN,double sigma6,double *da,double *dr,double 
         // Potencial operations
         term = sigma6/(r2*r2*r2);
         //myatomicAdd(dP,term * (term - 1));
-        dP[id]+=term * (term - 1);
+        dPaux+=term * (term - 1);
         // loop unrolling using the vars a1, a2 and a3 that reduce the number of accesses to the matrix a
         l1= rij[0] * f;
         l2= rij[1] * f;
@@ -422,73 +371,139 @@ void newpotacelarationKernel (int dN,double sigma6,double *da,double *dr,double 
         myatomicAdd(&da[j * 3 + 2], -l3);
     }
 
+    dP[id]=dPaux;
+
     myatomicAdd(&da[id * 3], a1);
     myatomicAdd(&da[id * 3 + 1], a2);
     myatomicAdd(&da[id * 3 + 2], a3);
-
 }
 
-void computeAccelerationsOPT() {
-    Pot = 0;
-    int i;
-    double P = 0;
-
-    double sigma6 = sigma*sigma*sigma*sigma*sigma*sigma;
-    
-    for (i = 0; i < N; i++) {
-        // loop unrolling
-        a[i][0] = 0;
-        a[i][1] = 0;
-        a[i][2] = 0;
-    }
-
-    #pragma omp parallel for reduction(+:P,a[:N][:3]) schedule(dynamic,40)
-    for (int i = 0; i < N-1; i++) {
-        double varRSqd,a1,a2,a3,l1,l2,l3; // computeAccelerations variables
-        double f, rSqd;
-        double term, r2;
-        double rij[3];
-        a1=0;a2=0;a3=0; // Reduces the number of accesses to a[i][0], a[i][1] and a[i][2] by storing the sum's value and writing it into the matrix outside of the loop j.
-        for (int j = i+1; j < N; j++) {
-            // loop unrolling
-            rij[0] = r[i][0] - r[j][0];
-            rij[1] = r[i][1] - r[j][1];
-            rij[2] = r[i][2] - r[j][2];
-            
-            rSqd = r2 = rij[0] * rij[0] +
-                        rij[1] * rij[1] +
-                        rij[2] * rij[2];
-
-            //  mathematical simplification
-            varRSqd = rSqd*rSqd*rSqd;
-            f = (48-24*varRSqd)/(varRSqd*varRSqd*rSqd);
-
-            // Potencial operations
-            term = sigma6/(r2*r2*r2);
-            P += term * (term - 1);
-            // end of potencial oprations
-
-            // loop unrolling using the vars a1, a2 and a3 that reduce the number of accesses to the matrix a
-            l1= rij[0] * f;
-            l2= rij[1] * f;
-            l3= rij[2] * f;
-            
-            a1 += l1;
-            a2 += l2;
-            a3 += l3;
-
-            a[j][0] -= l1;
-            a[j][1] -= l2;
-            a[j][2] -= l3;
+__device__ int determinarBlocoParticula(int bid, int dBlocos, const int* limites) {
+    for (int k = 0; k < dBlocos; ++k) {
+        if (bid < limites[k]) {
+            return k;
         }
-        // We only write the value into the matrix when we're outside of loop j in order to minimize the number of accesses to the matrix a.
-        a[i][0]+=a1;
-        a[i][1]+=a2;
-        a[i][2]+=a3;
     }
-    // Potencial operations
-    Pot = P*epsilon*8;
-    // end of potencial oprations
+}
+
+__global__ 
+void newpotacelarationKernelOPT (int dN,double sigma6,double *da,double *dr,double *dP,int dBlocos) {
+    int id = blockIdx.x * blockDim.x + threadIdx.x;
+    int lid = threadIdx.x;
+    int bid = blockIdx.x;
+    int particulas= blockDim.x;
+
+    __shared__ double shared_dr[1024*3];
+    __shared__ int blocoparticula;
+    __shared__ int blocoacomparar;
+    int limites[5];
+
+    int ultimathread = 1024 - (dBlocos*1024-dN)-1;
+
+    //int blocostotais = (dBlocos*(dBlocos+1))/2;
+    if(lid == 0){
+        int dBlocosaux=dBlocos;
+        for(int l=0;l<dBlocos;l++){
+            limites[l]=dBlocosaux;
+            dBlocosaux+=(dBlocos-l-1);
+        }
+
+        blocoparticula=determinarBlocoParticula(bid,dBlocos,limites);
+        if (blocoparticula==0){blocoacomparar= blockIdx.x;}
+        else{
+            blocoacomparar = blockIdx.x - limites[blocoparticula-1]+blocoparticula;
+        }
+        
+        for(int j = 0; j < 1024 ||(blocoacomparar == dBlocos-1 && j < ultimathread); j++) {
+            shared_dr[j * 3] = dr[(j + blocoacomparar*1024) * 3] ;
+            shared_dr[j * 3 + 1] = dr[(j + blocoacomparar*1024) * 3 + 1];
+            shared_dr[j * 3 + 2] = dr[(j + blocoacomparar*1024) * 3 + 2];         
+        }
+    }
+    __syncthreads();
+
+    int newID = (lid + blocoparticula * 1024);
+
+    double varRSqd,a1,a2,a3,l1,l2,l3; // computeAccelerations variables
+    double f, rSqd;
+    double term, r2;// Potential variables
+    double rij[3];
+    a1=0.0;a2=0.0;a3=0.0;
+    double aux[3];
+    aux[0]=dr[newID * 3];
+    aux[1]=dr[newID * 3 + 1];
+    aux[2]=dr[newID * 3 + 2];
+    double dPaux=0.0;
+    if (blocoparticula == dBlocos-1 && newID >= ultimathread) return;
+    /*
+    for (int j = lid+1;  j<ultimathread; j++) {
+        
+        rij[0] = aux[0] - shared_dr[j * 3];
+        rij[1] = aux[1] - shared_dr[j * 3 + 1];
+        rij[2] = aux[2] - shared_dr[j * 3 + 2];
+
+        rSqd = r2 = rij[0] * rij[0] +
+                    rij[1] * rij[1] +
+                    rij[2] * rij[2];
+
+        //  mathematical simplification
+        varRSqd = rSqd*rSqd*rSqd;
+        f = (48-24*varRSqd)/(varRSqd*varRSqd*rSqd);
+
+        // Potencial operations
+        term = sigma6/(r2*r2*r2);
+        //myatomicAdd(dP,term * (term - 1));
+        dPaux+=term * (term - 1);
+        // loop unrolling using the vars a1, a2 and a3 that reduce the number of accesses to the matrix a
+        l1= rij[0] * f;
+        l2= rij[1] * f;
+        l3= rij[2] * f;
+        
+        a1 += l1;
+        a2 += l2;
+        a3 += l3;
+        
+        myatomicAdd(&da[(j + blocoacomparar * 1024) * 3], -l1);
+        myatomicAdd(&da[(j + blocoacomparar * 1024) * 3 + 1], -l2);
+        myatomicAdd(&da[(j + blocoacomparar * 1024) * 3 + 2], -l3);
+        
+    }
+    *///TODO retificarid
+    for (int j = lid+1; j < 1024 ||(blocoacomparar == dBlocos-1 && j < ultimathread); j++) {
+        rij[0] = aux[0] - dr[(j + blocoacomparar*1024) * 3];
+        rij[1] = aux[1] - dr[(j + blocoacomparar*1024) * 3 + 1];
+        rij[2] = aux[2] - dr[(j + blocoacomparar*1024) * 3 + 2];
+    /*
+        rSqd = r2 = rij[0] * rij[0] +
+                    rij[1] * rij[1] +
+                    rij[2] * rij[2];
+    */
+        //  mathematical simplification
+        varRSqd = rSqd*rSqd*rSqd;
+        f = (48-24*varRSqd)/(varRSqd*varRSqd*rSqd);
+
+        // Potencial operations
+        term = sigma6/(r2*r2*r2);
+        dPaux+=(term * (term - 1));
+        // loop unrolling using the vars a1, a2 and a3 that reduce the number of accesses to the matrix a
+        l1= rij[0] * f;
+        l2= rij[1] * f;
+        l3= rij[2] * f;
+        
+        a1 += l1;
+        a2 += l2;
+        a3 += l3;
+        //ToDO retificar id
+        myatomicAdd(&da[newID * 3], -l1);
+        myatomicAdd(&da[newID * 3 + 1], -l2);
+        myatomicAdd(&da[newID * 3 + 2], -l3);
+
+    }
+    myatomicAdd(&dP[newID], dPaux);
+    myatomicAdd(&da[newID * 3], a1);
+    myatomicAdd(&da[newID * 3 + 1], a2);
+    myatomicAdd(&da[newID * 3 + 2], a3);
+    
 }
 
 // returns sum of dv/dt*m/A (aka Pressure) from elastic collisions with walls
@@ -519,7 +534,7 @@ double VelocityVerlet(double dt, int iter, FILE *fp) {
 
 
     initializeacelarationKernel <<< NUM_THREADS_PER_BLOCK, NUM_BLOCKS >>> (N, da);
-    newpotacelarationKernel <<< NUM_THREADS_PER_BLOCK, NUM_BLOCKS >>> (N,sigma6,da,dr,dP);
+    newpotacelarationKernelOPT <<< NUM_THREADS_PER_BLOCK, NUM_BLOCKS >>> (N,sigma6,da,dr,dP,5);
     checkCUDAError("kernel invocation,VelocityVerlet");
     double Pa[N];
     cudaMemcpy(Pa, dP, N * sizeof(double), cudaMemcpyDeviceToHost);
