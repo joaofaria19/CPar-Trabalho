@@ -3,4 +3,4 @@
 #SBATCH --partition=cpar
 #SBATCH --constraint=k20
 
-nvprof ./bin/MDpar < inputdata.txt
+time nvprof ./bin/MDpar < inputdata.txt

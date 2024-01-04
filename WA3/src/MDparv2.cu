@@ -44,7 +44,6 @@ double NA = 6.022140857e23;
 double kBSI = 1.38064852e-23;  // m^2*kg/(s^2*K)
 
 double Pot;
-double *dPot;
 double P;
 double *dP;
 
@@ -62,19 +61,12 @@ double r[MAXPART][3];
 double *dr;
 //  Velocity
 double v[MAXPART][3];
-// pointers to the device memory
-double *dv;
 //  Acceleration
 double a[MAXPART][3];
 // pointers to the device memory
 double *da;
 //  Force
 double F[MAXPART][3];
-
-double hKE,hPress,hmvs;
-double *dKE,*dPress,*dmvs;
-double results[4];
-double *dresults;
 
 #define NUM_BLOCKS 79
 #define NUM_THREADS_PER_BLOCK 64
@@ -180,17 +172,11 @@ void initializeKernel(){
 
     cudaMalloc ((void**) &da, bytes);
     cudaMalloc ((void**) &dr, bytes);
-    cudaMalloc ((void**) &dv, bytes); 
-    cudaMalloc((void**) &dP,NUM_BLOCKS*sizeof(double));
-    cudaMalloc((void**) &dmvs,NUM_BLOCKS*sizeof(double));
-    cudaMalloc((void**) &dKE,NUM_BLOCKS*sizeof(double));
-    cudaMalloc((void**) &dPress,NUM_BLOCKS*sizeof(double));
-    cudaMalloc((void**) &dresults, 4 * sizeof(double));
+    cudaMalloc((void**) &dP, N*sizeof(double));
     checkCUDAError("mem allocation");
 
     // copy inputs to the device
 	cudaMemcpy (dr,r,bytes,cudaMemcpyHostToDevice);
-    cudaMemcpy (dv,v,bytes,cudaMemcpyHostToDevice);
 	checkCUDAError("memcpy h->d");
 }
 
@@ -199,12 +185,7 @@ void freeKernel(){
     // free the device memory
     cudaFree(da);
     cudaFree(dr);
-    cudaFree(dv);
     cudaFree(dP);
-    cudaFree(dmvs);
-    cudaFree(dKE);
-    cudaFree(dPress);
-    cudaFree(dresults);
     checkCUDAError("mem free");
 }
 
@@ -228,45 +209,6 @@ double MeanSquaredVelocity() {
 
     //printf("  Average of x-component of velocity squared is %f\n",v2);
     return v2;
-}
-
-__global__
-void MeanSquaredVelocitykernel(int dN,double *dv,double *dmvs){
-    int id = blockIdx.x * blockDim.x + threadIdx.x;
-    int lid = threadIdx.x;
-    __shared__ double shared_dmvs[NUM_THREADS_PER_BLOCK]; 
-    shared_dmvs[lid]=0;
-    //if (id==0){dresults[1]=0;}
-    __syncthreads();
-
-    if (id >= dN) return;
-
-    double vx2 = 0;
-    double vy2 = 0;
-    double vz2 = 0;
-    double v2;
-
-    vx2 = vx2 + dv[id * 3]*dv[id * 3];
-    vy2 = vy2 + dv[id * 3 + 1]*dv[id * 3 + 1];
-    vz2 = vz2 + dv[id * 3 + 2]*dv[id * 3 + 2];
-
-    v2 = (vx2+vy2+vz2)/dN;
-    //ver como fazer
-    //TODO
-    //myatomicAdd(&dresults[1],v2);
-    shared_dmvs[lid]=v2;
-    __syncthreads();
-
-    for (unsigned int s=blockDim.x/2; s>0; s>>=1) {
-        if (lid < s) {
-            shared_dmvs[lid] += shared_dmvs[lid + s];
-        }
-        __syncthreads();
-    }
-    // O thread 0 de cada bloco grava o resultado final no vetor de saída
-    if (lid == 0) {
-        dmvs[blockIdx.x] = shared_dmvs[0];
-    }
 }
 
 //  Function to calculate the kinetic energy of the system
@@ -293,46 +235,6 @@ double Kinetic() { //Write Function here!
 }
 
 __global__
-void Kinetickernel(int dN,double *dv,double *dKE,double m){
-    int id = blockIdx.x * blockDim.x + threadIdx.x;
-    int lid = threadIdx.x;
-    __shared__ double shared_dKE[NUM_THREADS_PER_BLOCK]; 
-    shared_dKE[lid]=0;
-    if (id >= dN) return;
-
-    //if (id==0){dresults[2]=0;}
-    __syncthreads(); 
-    double v2, kin;
-
-    kin =0.;
-    v2 = 0.;
-    for (int j=0; j<3; j++) {
-
-        v2 += dv[id * 3 + j]*dv[id * 3 + j];
-
-    }
-    kin += m*v2/2.;
-
-    //printf("  Total Kinetic Energy is %f\n",N*mvs*m/2.);
-    //TODO
-    //myatomicAdd(&dresults[2],kin);
-
-    shared_dKE[lid]=kin;
-    __syncthreads();
-
-    for (unsigned int s=blockDim.x/2; s>0; s>>=1) {
-        if (lid < s) {
-            shared_dKE[lid] += shared_dKE[lid + s];
-        }
-        __syncthreads();
-    }
-    // O thread 0 de cada bloco grava o resultado final no vetor de saída
-    if (lid == 0) {
-        dKE[blockIdx.x] = shared_dKE[0];
-    }
-}
-
-__global__
 void initializeacelarationKernel (int dN,double *da) {
     int id = blockIdx.x * blockDim.x + threadIdx.x;
     if (id >= dN) return;
@@ -341,6 +243,132 @@ void initializeacelarationKernel (int dN,double *da) {
     da[id * 3 + 1] = 0;
     da[id * 3 + 2] = 0;
 }
+/*
+__global__
+void newacelarationKernel (int dN,double *da,double *dr) {
+    int id = blockIdx.x * blockDim.x + threadIdx.x;
+    int lid = threadIdx.x;
+
+    if (id >= dN-1) return;
+
+    double varRSqd,a1,a2,a3,l1,l2,l3; // computeAccelerations variables
+    double f, rSqd;
+    double rij[3];
+    a1=0;a2=0;a3=0;
+    double aux[3];
+    aux[0]=dr[id * 3];
+    aux[1]=dr[id * 3 + 1];
+    aux[2]=dr[id * 3 + 2];
+
+    for (int j = id+1; j < dN; j++) {
+
+        rij[0] = aux[0] - dr[j * 3];
+        rij[1] = aux[1] - dr[j * 3 + 1];
+        rij[2] = aux[2] - dr[j * 3 + 2];
+
+        rSqd  = rij[0] * rij[0] +
+                rij[1] * rij[1] +
+                rij[2] * rij[2];
+
+        //  mathematical simplification
+        varRSqd = rSqd*rSqd*rSqd;
+        f = (48-24*varRSqd)/(varRSqd*varRSqd*rSqd);
+
+        // loop unrolling using the vars a1, a2 and a3 that reduce the number of accesses to the matrix a
+        l1= rij[0] * f;
+        l2= rij[1] * f;
+        l3= rij[2] * f;
+
+        a1 += l1;
+        a2 += l2;
+        a3 += l3;
+
+        myatomicAdd(&da[j * 3], -l1);
+        myatomicAdd(&da[j * 3 + 1], -l2);
+        myatomicAdd(&da[j * 3 + 2], -l3);
+    }
+
+    myatomicAdd(&da[id * 3], a1);
+    myatomicAdd(&da[id * 3 + 1], a2);
+    myatomicAdd(&da[id * 3 + 2], a3);
+
+}
+
+__global__
+void newpotacelarationKernel (int dN,double sigma6,double *da,double *dr,double *dP) {
+    int id = blockIdx.x * blockDim.x + threadIdx.x;
+    int lid = threadIdx.x;
+
+    __shared__ double shared_dP[NUM_THREADS_PER_BLOCK];    
+    shared_dP[lid]=0;
+    if (id >= dN-1) return;
+
+    double varRSqd,a1,a2,a3,l1,l2,l3; // computeAccelerations variables
+    double f, rSqd;
+    double term, r2;// Potential variables
+    double rij[3];
+    a1=0;a2=0;a3=0;
+
+    double dPaux=0.0;
+    double aux[3];
+    aux[0]=dr[id * 3];
+    aux[1]=dr[id * 3 + 1];
+    aux[2]=dr[id * 3 + 2];
+
+    for (int j = id+1; j < dN; j++) {
+
+        rij[0] = aux[0] - dr[j * 3];
+        rij[1] = aux[1] - dr[j * 3 + 1];
+        rij[2] = aux[2] - dr[j * 3 + 2];
+
+        rSqd = r2 = rij[0] * rij[0] +
+                    rij[1] * rij[1] +
+                    rij[2] * rij[2];
+
+        //  mathematical simplification
+        varRSqd = rSqd*rSqd*rSqd;
+        f = (48-24*varRSqd)/(varRSqd*varRSqd*rSqd);
+
+        // Potencial operations
+        term = sigma6/(r2*r2*r2);
+        //myatomicAdd(dP,term * (term - 1));
+        dPaux+=term * (term - 1);
+        // loop unrolling using the vars a1, a2 and a3 that reduce the number of accesses to the matrix a
+        l1= rij[0] * f;
+        l2= rij[1] * f;
+        l3= rij[2] * f;
+
+        a1 += l1;
+        a2 += l2;
+        a3 += l3;
+        
+        myatomicAdd(&da[j * 3], -l1);
+        myatomicAdd(&da[j * 3 + 1], -l2);
+        myatomicAdd(&da[j * 3 + 2], -l3);
+        
+    }
+
+    //dP[id]=dPaux;
+    shared_dP[lid]=dPaux;
+
+    myatomicAdd(&da[id * 3], a1);
+    myatomicAdd(&da[id * 3 + 1], a2);
+    myatomicAdd(&da[id * 3 + 2], a3);
+
+    __syncthreads();
+
+    for (unsigned int s=blockDim.x/2; s>0; s>>=1) {
+        if (lid < s) {
+            shared_dP[lid] += shared_dP[lid + s];
+        }
+        __syncthreads();
+    }
+    // O thread 0 de cada bloco grava o resultado final no vetor de saída
+    if (lid == 0) {
+        dP[blockIdx.x] = shared_dP[0];
+    }
+}
+*/
 
 __global__
 void newacelarationKernel (int dN,double *da,double *dr) {
@@ -483,43 +511,7 @@ void newpotacelarationKernel1Part (int dN,double sigma6,double *da,double *dr,do
     da[id * 3 + 1]+=a2;
     da[id * 3 + 2]+=a3;
 
-    //dP[id]=dPaux;
-    shared_dP[lid]=dPaux;
-    __syncthreads();
-
-    for (unsigned int s=blockDim.x/2; s>0; s>>=1) {
-        if (lid < s) {
-            shared_dP[lid] += shared_dP[lid + s];
-        }
-        __syncthreads();
-    }
-    // O thread 0 de cada bloco grava o resultado final no vetor de saída
-    if (lid == 0) {
-        dP[blockIdx.x] = shared_dP[0];
-    }
-
-}
-
-__global__
-void reduce (double *dP,double *dresults,double *dmvs,double *dPress,double *dKE) {
-    int id = blockIdx.x * blockDim.x + threadIdx.x;
-    if (id >= 1) return;
-
-    double auxP = 0.0;
-    double auxmvs = 0.0;
-    double auxPress = 0.0;
-    double auxKE = 0.0;
-    for (int i = 0; i < NUM_BLOCKS ; i++){
-        auxP += dP[i];
-        auxmvs += dmvs[i];
-        auxPress += dPress[i];
-        auxKE += dKE[i];
-    }
-
-    dresults[3]=auxP;
-    dresults[0]=auxPress;
-    dresults[1]=auxmvs;
-    dresults[2]=auxKE;
+    dP[id]=dPaux;
 }
 
 // returns sum of dv/dt*m/A (aka Pressure) from elastic collisions with walls
@@ -600,77 +592,6 @@ double VelocityVerlet(double dt, int iter, FILE *fp) {
     return psum/(6*L*L);
 }
 
-__global__
-void posvelKernel (int dN,double *dr,double *dv,double *da,double dt,double *dresults) {
-    int id = blockIdx.x * blockDim.x + threadIdx.x;
-    if (id >= dN) return;
-
-    for (int j=0; j<3; j++) {
-        dr[id * 3 + j] += dv[id * 3 + j]*dt + 0.5*da[id * 3 + j]*dt*dt;
-        
-        dv[id * 3 + j] += 0.5*da[id * 3 + j]*dt;
-    }
-
-    if(id==0){
-        dresults[0]=0;
-        dresults[1]=0;
-        dresults[2]=0;
-        dresults[3]=0;
-    }
-}
-
-__global__
-void updatevelKernel (int dN,double *dv,double *da,double dt) {
-    int id = blockIdx.x * blockDim.x + threadIdx.x;
-    if (id >= dN) return;
-
-    for (int j=0; j<3; j++) {
-        dv[id * 3 + j] += 0.5*da[id * 3 + j]*dt;
-    }
-
-}
-
-__global__
-void elasticKernel (int dN,double *dr,double *dv,double *da,double *dPress,double dt,double m,double L) {
-    int id = blockIdx.x * blockDim.x + threadIdx.x;
-    int lid = threadIdx.x;
-
-    __shared__ double shared_dPress[NUM_THREADS_PER_BLOCK]; 
-    shared_dPress[lid]=0;
-    if (id >= dN) return;
-    //if (id==0){dresults[0]=0;}
-    __syncthreads();    
-    double psum = 0.;
-    // Elastic walls
-    for (int j=0; j<3; j++) {
-        if (dr[id * 3 + j]<0.) {
-            dv[id * 3 + j] *=-1.; //- elastic walls
-            psum += 2*m*fabs(dv[id * 3 + j])/dt;  // contribution to pressure from "left" walls
-        }
-        if (dr[id * 3 + j]>=L) {
-            dv[id * 3 + j]*=-1.;  //- elastic walls
-            psum += 2*m*fabs(dv[id * 3 + j])/dt;  // contribution to pressure from "right" walls
-        }
-    }
-    //ver como fazer
-    //return psum/(6*L*L);
-    //double aux = psum/(6*L*L); 
-    //myatomicAdd(&dresults[0],aux);
-
-    shared_dPress[lid]=psum/(6*L*L);
-    __syncthreads();
-
-    for (unsigned int s=blockDim.x/2; s>0; s>>=1) {
-        if (lid < s) {
-            shared_dPress[lid] += shared_dPress[lid + s];
-        }
-        __syncthreads();
-    }
-    // O thread 0 de cada bloco grava o resultado final no vetor de saída
-    if (lid == 0) {
-        dPress[blockIdx.x] = shared_dPress[0];
-    }
-}
 
 void initializeVelocities() {
 
@@ -985,34 +906,20 @@ int main()
         else if (i==10*tenp) printf(" 100 ]\n");
         fflush(stdout);
 
-        //begin velocityveret
-        posvelKernel<<<NUM_BLOCKS,NUM_THREADS_PER_BLOCK>>> (N,dr,dv,da,dt,dresults);
-        initializeacelarationKernel <<< NUM_BLOCKS,NUM_THREADS_PER_BLOCK >>> (N, da);
-        double sigma6 = sigma*sigma*sigma*sigma*sigma*sigma;
-        newpotacelarationKernel1Part <<<NUM_BLOCKS,NUM_THREADS_PER_BLOCK>>> (N,sigma6,da,dr,dP);
 
-        updatevelKernel<<<NUM_BLOCKS,NUM_THREADS_PER_BLOCK>>>(N,dv,da,dt);
-
-        elasticKernel<<<NUM_BLOCKS,NUM_THREADS_PER_BLOCK>>>(N,dr,dv,da,dPress,dt,m,L);
-        //end velocityverlet
-        
-        MeanSquaredVelocitykernel<<<NUM_BLOCKS,NUM_THREADS_PER_BLOCK>>>(N,dv,dmvs);
-        
-        Kinetickernel<<<NUM_BLOCKS,NUM_THREADS_PER_BLOCK>>>(N,dv,dKE,m);
-
-        reduce<<<NUM_BLOCKS,NUM_THREADS_PER_BLOCK>>>(dP,dresults,dmvs,dPress,dKE);
-
-
-        cudaMemcpy(results, dresults, 4 * sizeof(double), cudaMemcpyDeviceToHost);
-        checkCUDAError("memcpy d->h,results");
-        Press = results[0];
+        // This updates the positions and velocities using Newton's Laws
+        // Also computes the Pressure as the sum of momentum changes from wall collisions / timestep
+        // which is a Kinetic Theory of gasses concept of Pressure
+        Press = VelocityVerlet(dt, i+1, tfp);
         Press *= PressFac;
-        mvs = results[1];
-        KE = results[2];
-        P = results[3];
 
-        Pot = P*epsilon*8;
-
+        //  !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        //  Now we would like to calculate somethings about the system:
+        //  Instantaneous mean velocity squared, Temperature, Pressure
+        //  Potential, and Kinetic Energy
+        //  We would also like to use the IGL to try to see if we can extract the gas constant
+        mvs = MeanSquaredVelocity();
+        KE = Kinetic();
         PE = Pot;
 
         // Temperature from Kinetic Theory

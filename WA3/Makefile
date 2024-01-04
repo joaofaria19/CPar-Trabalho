@@ -42,5 +42,5 @@ all: checkdirs $(BIN_DIR)/$(BIN_NAME)
 clean:
 	rm -f $(BUILD_DIR)/* $(BIN_DIR)/*
 
-runPerfStat: checkdirs $(BIN_DIR)/$(BIN_NAME)
-	perf stat -o perfStat.txt -M cpi ./$(BIN_DIR)/$(BIN_NAME) < inputdata.txt
+run:
+	sbatch run.sh
