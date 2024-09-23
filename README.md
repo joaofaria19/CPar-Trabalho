@@ -1,4 +1,4 @@
-# CP-Trabalho
+# CPar-Trabalho
 
 Trabalho Prático no âmbito da UC de Computação Paralela
 
